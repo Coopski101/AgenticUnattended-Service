@@ -17,7 +17,7 @@ A local HTTP+SSE service that tracks AI agent activity across multiple VS Code w
 ## Quick Start
 
 ```bash
-cd src/beacon-core
+cd src/AgenticUnattended-Service
 dotnet run
 ```
 
@@ -103,7 +103,7 @@ The steps above are **per-project** — hooks only fire in repos that have the c
 
 ## Configuration
 
-Edit `src/beacon-core/appsettings.json` or override via environment variables using the ASP.NET Core convention (`Beacon__PropertyName`):
+Edit `src/AgenticUnattended-Service/appsettings.json` or override via environment variables using the ASP.NET Core convention (`Beacon__PropertyName`):
 
 | Setting | Default | Description |
 |---|---|---|
