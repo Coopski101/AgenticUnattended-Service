@@ -67,9 +67,18 @@ public sealed class SessionOrchestrator : BackgroundService
                 _config.VscodeProcessName,
                 StringComparison.OrdinalIgnoreCase
             );
+        var isCliFocused =
+            focusedProcess is not null
+            && _config.CliProcessNames.Any(n =>
+                string.Equals(n, focusedProcess, StringComparison.OrdinalIgnoreCase)
+            );
 
         var windowHandle = nint.Zero;
         if (isVsCodeFocused && focusedHwnd is not null)
+        {
+            windowHandle = focusedHwnd.Value;
+        }
+        else if (isCliFocused && source == AgentSource.ClaudeCode && focusedHwnd is not null)
         {
             windowHandle = focusedHwnd.Value;
         }
@@ -284,8 +293,11 @@ public sealed class SessionOrchestrator : BackgroundService
             _config.VscodeProcessName,
             StringComparison.OrdinalIgnoreCase
         );
+        var isCli = _config.CliProcessNames.Any(n =>
+            string.Equals(n, processName, StringComparison.OrdinalIgnoreCase)
+        );
 
-        if (!isVsCode)
+        if (!isVsCode && !isCli)
             return;
 
         var session = _registry.TryGetSessionByHwnd(hwnd);

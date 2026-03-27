@@ -12,6 +12,8 @@ public sealed class BeaconConfig
 
     public Dictionary<string, string> CopilotEventMappings { get; set; } = DefaultCopilotMappings();
 
+    public List<string> CliProcessNames { get; set; } = ["cmd", "powershell", "pwsh", "WindowsTerminal"];
+
     public Dictionary<string, string> ClaudeEventMappings { get; set; } = DefaultClaudeMappings();
 
     private static Dictionary<string, string> DefaultCopilotMappings() =>

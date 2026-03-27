@@ -71,6 +71,9 @@ public sealed class SessionRegistry
         {
             foreach (var session in _sessions.Values.ToList())
             {
+                if (session.WindowHandle == nint.Zero)
+                    continue;
+
                 if (!isAlive(session.WindowHandle))
                 {
                     dead.Add(session);
