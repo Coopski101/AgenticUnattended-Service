@@ -6,3 +6,4 @@ obj/
 *.DotSettings.user
 plans/
 .github/hooks/
+.claude/settings.json

@@ -11,9 +11,9 @@ $TargetDir = Resolve-Path $TargetDir
 Write-Host "Installing beacon hooks into: $TargetDir"
 Write-Host ""
 
-$copilotDir = Join-Path $TargetDir ".github" "hooks"
+$copilotDir = Join-Path (Join-Path $TargetDir ".github") "hooks"
 New-Item -ItemType Directory -Path $copilotDir -Force | Out-Null
-Copy-Item (Join-Path $repoRoot "hook-configs" "copilot" "CopilotHookSettings.json") (Join-Path $copilotDir "CopilotHookSettings.json") -Force
+Copy-Item (Join-Path (Join-Path (Join-Path $repoRoot "hook-configs") "copilot") "CopilotHookSettings.json") (Join-Path $copilotDir "CopilotHookSettings.json") -Force
 Write-Host "[copilot]  Installed .github/hooks/CopilotHookSettings.json"
 
 $claudeDir = Join-Path $TargetDir ".claude"
@@ -24,7 +24,7 @@ if (Test-Path $claudeSettings) {
     Write-Host "           Manually merge the hooks from: hook-configs/claude-code/settings.json"
 }
 else {
-    Copy-Item (Join-Path $repoRoot "hook-configs" "claude-code" "settings.json") $claudeSettings -Force
+    Copy-Item (Join-Path (Join-Path (Join-Path $repoRoot "hook-configs") "claude-code") "settings.json") $claudeSettings -Force
     Write-Host "[claude]   Installed .claude/settings.json"
 }
 

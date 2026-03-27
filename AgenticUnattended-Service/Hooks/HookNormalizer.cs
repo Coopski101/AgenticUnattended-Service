@@ -119,6 +119,12 @@ public sealed class HookNormalizer
 
     private static AgentSource DetectAgent(HookPayload payload)
     {
+        if (string.Equals(payload.Source, "copilot", StringComparison.OrdinalIgnoreCase))
+            return AgentSource.Copilot;
+
+        if (string.Equals(payload.Source, "claude", StringComparison.OrdinalIgnoreCase))
+            return AgentSource.ClaudeCode;
+
         if (payload.ClaudeHookEventName is not null)
             return AgentSource.ClaudeCode;
 

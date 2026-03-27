@@ -80,6 +80,10 @@ public static class Endpoints
                 if (payload is null)
                     return Results.BadRequest(new { error = "Empty payload" });
 
+                var sourceOverride = ctx.Request.Query["source"].FirstOrDefault();
+                if (sourceOverride is not null)
+                    payload.Source = sourceOverride;
+
                 var sessionId = payload.ResolvedSessionId;
 
                 var result = normalizer.Normalize(payload);
