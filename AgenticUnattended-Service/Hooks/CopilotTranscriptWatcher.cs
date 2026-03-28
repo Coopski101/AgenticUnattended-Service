@@ -243,7 +243,7 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
             _logger.LogDebug(
                 "Transcript [{Session}]: tool {Id} started (auto-approved)",
                 ts.SessionId,
-                toolCallId[^8..]
+                toolCallId.Length <= 8 ? toolCallId : toolCallId[^8..]
             );
         }
     }
