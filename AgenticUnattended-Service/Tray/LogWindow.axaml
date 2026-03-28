@@ -1,0 +1,13 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AgenticUnattended.Tray.LogWindow"
+        Title="Agentic Unattended Service — Log"
+        Width="900" Height="500"
+        WindowStartupLocation="CenterScreen">
+    <TextBox x:Name="LogText"
+             IsReadOnly="True"
+             AcceptsReturn="True"
+             TextWrapping="NoWrap"
+             FontFamily="Cascadia Mono, Consolas, Menlo, monospace"
+             FontSize="12" />
+</Window>
