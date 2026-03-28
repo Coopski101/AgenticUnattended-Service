@@ -6,14 +6,14 @@ namespace AgenticUnattended.Services;
 
 public sealed class FakeEventEmitter : BackgroundService
 {
-    private readonly SessionOrchestrator _orchestrator;
+    private readonly SessionStateMachine _stateMachine;
     private readonly ILogger<FakeEventEmitter> _logger;
 
     private const string FakeSessionId = "fake-session-001";
 
-    public FakeEventEmitter(SessionOrchestrator orchestrator, ILogger<FakeEventEmitter> logger)
+    public FakeEventEmitter(SessionStateMachine stateMachine, ILogger<FakeEventEmitter> logger)
     {
-        _orchestrator = orchestrator;
+        _stateMachine = stateMachine;
         _logger = logger;
     }
 
@@ -36,7 +36,7 @@ public sealed class FakeEventEmitter : BackgroundService
 
             var (action, reason) = sequence[index % sequence.Length];
             _logger.LogInformation("Emitting fake event: {Event}", action);
-            _orchestrator.HandleStateChange(
+            _stateMachine.HandleStateChange(
                 FakeSessionId,
                 AgentSource.Unknown,
                 action,

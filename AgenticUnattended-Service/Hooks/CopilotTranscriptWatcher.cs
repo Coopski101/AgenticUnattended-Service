@@ -7,8 +7,10 @@ namespace AgenticUnattended.Hooks;
 
 public sealed class CopilotTranscriptWatcher : BackgroundService
 {
-    private readonly IServiceProvider _services;
+    private readonly SessionStateMachine _stateMachine;
+    private readonly ITranscriptFileReader _fileReader;
     private readonly BeaconConfig _config;
+    private readonly TimeProvider _time;
     private readonly ILogger<CopilotTranscriptWatcher> _logger;
     private readonly Lock _lock = new();
     private readonly Dictionary<string, TranscriptSession> _sessions = new();
@@ -16,13 +18,17 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(300);
 
     public CopilotTranscriptWatcher(
-        IServiceProvider services,
+        SessionStateMachine stateMachine,
+        ITranscriptFileReader fileReader,
         BeaconConfig config,
+        TimeProvider time,
         ILogger<CopilotTranscriptWatcher> logger
     )
     {
-        _services = services;
+        _stateMachine = stateMachine;
+        _fileReader = fileReader;
         _config = config;
+        _time = time;
         _logger = logger;
     }
 
@@ -49,20 +55,12 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
         }
     }
 
-    private static void SeekToEnd(TranscriptSession ts)
+    private void SeekToEnd(TranscriptSession ts)
     {
         try
         {
-            if (File.Exists(ts.Path))
-            {
-                using var fs = new FileStream(
-                    ts.Path,
-                    FileMode.Open,
-                    FileAccess.Read,
-                    FileShare.ReadWrite
-                );
-                ts.LastFilePosition = fs.Length;
-            }
+            if (_fileReader.Exists(ts.Path))
+                ts.LastFilePosition = _fileReader.GetLength(ts.Path);
         }
         catch { }
     }
@@ -101,10 +99,10 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
 
     private void ReadNewLines(TranscriptSession ts)
     {
-        if (!File.Exists(ts.Path))
+        if (!_fileReader.Exists(ts.Path))
             return;
 
-        using var fs = new FileStream(ts.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var fs = _fileReader.OpenRead(ts.Path);
 
         if (fs.Length <= ts.LastFilePosition)
             return;
@@ -232,8 +230,7 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
                 ts.WaitingPublished = false;
             }
 
-            var orchestrator = _services.GetRequiredService<SessionOrchestrator>();
-            orchestrator.HandleStateChange(
+            _stateMachine.HandleStateChange(
                 ts.SessionId,
                 AgentSource.Copilot,
                 HookAction.Clear,
@@ -266,7 +263,7 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
         {
             try
             {
-                await Task.Delay(_config.AutoApprovedToolDetectionDelayMs, cts!.Token);
+                await Task.Delay(TimeSpan.FromMilliseconds(_config.AutoApprovedToolDetectionDelayMs), _time, cts!.Token);
             }
             catch (OperationCanceledException)
             {
@@ -293,8 +290,7 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
                 _config.AutoApprovedToolDetectionDelayMs
             );
 
-            var orchestrator = _services.GetRequiredService<SessionOrchestrator>();
-            orchestrator.HandleStateChange(
+            _stateMachine.HandleStateChange(
                 ts.SessionId,
                 AgentSource.Copilot,
                 HookAction.Waiting,

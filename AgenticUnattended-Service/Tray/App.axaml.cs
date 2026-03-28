@@ -126,8 +126,11 @@ public partial class App : Application
 
             builder.Services.AddSingleton(bus);
             builder.Services.AddSingleton(config);
+            builder.Services.AddSingleton(TimeProvider.System);
+            builder.Services.AddSingleton<ITranscriptFileReader, TranscriptFileReader>();
             builder.Services.AddSingleton<HookNormalizer>();
             builder.Services.AddSingleton<SessionRegistry>();
+            builder.Services.AddSingleton<SessionStateMachine>();
             builder.Services.AddSingleton<CopilotTranscriptWatcher>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<CopilotTranscriptWatcher>());
 

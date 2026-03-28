@@ -10,7 +10,7 @@ public static class Endpoints
     {
         var normalizer = app.Services.GetRequiredService<HookNormalizer>();
         var transcriptWatcher = app.Services.GetRequiredService<CopilotTranscriptWatcher>();
-        var orchestrator = app.Services.GetRequiredService<SessionOrchestrator>();
+        var stateMachine = app.Services.GetRequiredService<SessionStateMachine>();
         var registry = app.Services.GetRequiredService<SessionRegistry>();
 
         app.MapGet("/events", (HttpContext ctx) => SseHandler.HandleSseConnection(ctx, bus));
@@ -95,7 +95,7 @@ public static class Endpoints
 
                 if (result.Action == HookAction.WatchTranscript)
                 {
-                    orchestrator.HandleStateChange(
+                    stateMachine.HandleStateChange(
                         sessionId,
                         result.Source,
                         HookAction.Clear,
@@ -113,7 +113,7 @@ public static class Endpoints
                     );
                 }
 
-                orchestrator.HandleStateChange(
+                stateMachine.HandleStateChange(
                     sessionId,
                     result.Source,
                     result.Action,
