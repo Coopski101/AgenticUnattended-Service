@@ -9,6 +9,7 @@ using AgenticUnattended.Config;
 using AgenticUnattended.Events;
 using AgenticUnattended.Hooks;
 using AgenticUnattended.Platform;
+using AgenticUnattended.Platform.macOS;
 using AgenticUnattended.Platform.Windows;
 using AgenticUnattended.Server;
 using AgenticUnattended.Services;
@@ -145,6 +146,8 @@ public partial class App : Application
             {
                 if (OperatingSystem.IsWindows())
                     builder.Services.AddSingleton<IPlatformMonitor, WindowsPlatformMonitor>();
+                else if (OperatingSystem.IsMacOS())
+                    builder.Services.AddSingleton<IPlatformMonitor, MacPlatformMonitor>();
                 else
                     builder.Services.AddSingleton<IPlatformMonitor, NullPlatformMonitor>();
 
