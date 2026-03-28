@@ -94,6 +94,14 @@ public static class Endpoints
                     transcriptWatcher.SetTranscriptPath(sessionId, result.TranscriptPath);
 
                 if (result.Action == HookAction.WatchTranscript)
+                {
+                    orchestrator.HandleStateChange(
+                        sessionId,
+                        result.Source,
+                        HookAction.Clear,
+                        result.HookEvent,
+                        "Agent is actively using tools"
+                    );
                     return Results.Ok(
                         new
                         {
@@ -103,6 +111,7 @@ public static class Endpoints
                             sessionId,
                         }
                     );
+                }
 
                 orchestrator.HandleStateChange(
                     sessionId,
