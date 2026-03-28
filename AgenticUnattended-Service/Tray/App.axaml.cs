@@ -167,7 +167,7 @@ public partial class App : Application
         }
     }
 
-    private static WindowIcon? CreateIcon()
+    public static WindowIcon? CreateIcon()
     {
         try
         {

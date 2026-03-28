@@ -8,6 +8,7 @@ public partial class LogWindow : Window
     public LogWindow()
     {
         InitializeComponent();
+        Icon = App.CreateIcon();
         App.LogSink.LogReceived += OnLogReceived;
         LogText.Text = App.LogSink.GetFullLog();
     }
