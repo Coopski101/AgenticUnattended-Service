@@ -5,7 +5,7 @@ namespace AgenticUnattended.Sessions;
 public sealed class SessionInfo
 {
     public string SessionId { get; }
-    public nint WindowHandle { get; }
+    public nint WindowHandle { get; set; }
     public AgentSource Source { get; set; }
     public BeaconMode InternalState { get; set; } = BeaconMode.Idle;
     public BeaconMode PublishedState { get; set; } = BeaconMode.Idle;

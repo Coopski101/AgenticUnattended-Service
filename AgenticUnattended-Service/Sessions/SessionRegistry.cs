@@ -56,6 +56,26 @@ public sealed class SessionRegistry
         return _sessions.Values.ToList();
     }
 
+    public void ReassociateWindow(SessionInfo session, nint newHwnd)
+    {
+        lock (_lock)
+        {
+            if (session.WindowHandle != nint.Zero)
+                _hwndToSession.TryRemove(session.WindowHandle, out _);
+
+            session.WindowHandle = newHwnd;
+            _hwndToSession[newHwnd] = session.SessionId;
+        }
+    }
+
+    public SessionInfo? FindOrphanedSession()
+    {
+        lock (_lock)
+        {
+            return _sessions.Values.FirstOrDefault(s => s.WindowHandle == nint.Zero);
+        }
+    }
+
     public void EndSession(string sessionId)
     {
         lock (_lock)

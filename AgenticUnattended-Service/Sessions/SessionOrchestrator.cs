@@ -105,6 +105,16 @@ public sealed class SessionOrchestrator : BackgroundService
             source
         );
 
+        if (!isNew && windowHandle != nint.Zero && session.WindowHandle == nint.Zero)
+        {
+            _registry.ReassociateWindow(session, windowHandle);
+            _logger.LogInformation(
+                "Session {SessionId} late-bound to hwnd 0x{Hwnd:X}",
+                sessionId,
+                windowHandle
+            );
+        }
+
         if (displacedId is not null)
         {
             _logger.LogInformation(
@@ -302,7 +312,24 @@ public sealed class SessionOrchestrator : BackgroundService
 
         var session = _registry.TryGetSessionByHwnd(hwnd);
         if (session is null)
-            return;
+        {
+            var orphan = _registry.FindOrphanedSession();
+            if (orphan is not null)
+            {
+                _registry.ReassociateWindow(orphan, hwnd);
+                _logger.LogInformation(
+                    "Session {Session} adopted hwnd 0x{Hwnd:X} on focus ({Process})",
+                    orphan.SessionId,
+                    hwnd,
+                    processName
+                );
+                session = orphan;
+            }
+            else
+            {
+                return;
+            }
+        }
 
         if (session.PublishedState is BeaconMode.Waiting or BeaconMode.Done)
         {
