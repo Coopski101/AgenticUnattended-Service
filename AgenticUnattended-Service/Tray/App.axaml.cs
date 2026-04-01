@@ -5,6 +5,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using Microsoft.Extensions.Logging;
 using AgenticUnattended.Config;
 using AgenticUnattended.Events;
 using AgenticUnattended.Hooks;
@@ -118,6 +119,9 @@ public partial class App : Application
 
             builder.Logging.ClearProviders();
             builder.Logging.AddProvider(new LogSinkProvider(LogSink));
+            var fileLogSink = new FileLogSink();
+            builder.Logging.AddProvider(new FileLogSinkProvider(fileLogSink));
+            builder.Logging.AddFilter<FileLogSinkProvider>(null, LogLevel.Trace);
 
             var config = new BeaconConfig();
             builder.Configuration.GetSection("Beacon").Bind(config);
