@@ -55,6 +55,39 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
         }
     }
 
+    public void ConfirmToolStarted(string sessionId, string toolUseId)
+    {
+        var baseId = StripVscodeSuffix(toolUseId);
+        if (!IsParentToolCallId(baseId))
+            return;
+
+        lock (_lock)
+        {
+            if (!_sessions.TryGetValue(sessionId, out var ts))
+                return;
+
+            if (!ts.PendingToolCallIds.Remove(baseId))
+                return;
+
+            _logger.LogDebug(
+                "Transcript [{Session}]: tool {Id} confirmed started via hook (remaining: {Remaining})",
+                sessionId,
+                baseId.Length <= 12 ? baseId : baseId[^12..],
+                ts.PendingToolCallIds.Count
+            );
+
+            ts.WaitingTimerCts?.Cancel();
+            ts.WaitingTimerCts?.Dispose();
+            ts.WaitingTimerCts = null;
+        }
+    }
+
+    private static string StripVscodeSuffix(string id)
+    {
+        var idx = id.IndexOf("__vscode-", StringComparison.Ordinal);
+        return idx >= 0 ? id[..idx] : id;
+    }
+
     private void SeekToEnd(TranscriptSession ts)
     {
         try
@@ -142,10 +175,16 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
                 case "tool.execution_start":
                     HandleToolExecutionStart(ts, root);
                     break;
+                case "tool.execution_complete":
+                    HandleToolExecutionComplete(ts, root);
+                    break;
             }
         }
         catch (JsonException) { }
     }
+
+    private static bool IsParentToolCallId(string id) =>
+        id.StartsWith("toolu_", StringComparison.Ordinal);
 
     private void HandleAssistantMessage(TranscriptSession ts, JsonElement root)
     {
@@ -164,7 +203,7 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
             if (req.TryGetProperty("toolCallId", out var idProp))
             {
                 var id = idProp.GetString();
-                if (id is not null)
+                if (id is not null && IsParentToolCallId(id))
                     toolCallIds.Add(id);
             }
         }
@@ -181,9 +220,10 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
         }
 
         _logger.LogDebug(
-            "Transcript [{Session}]: {Count} tool request(s) pending approval",
+            "Transcript [{Session}]: {Count} parent tool request(s) pending approval: [{Ids}]",
             ts.SessionId,
-            toolCallIds.Count
+            toolCallIds.Count,
+            string.Join(", ", toolCallIds.Select(id => id.Length <= 12 ? id : id[^12..]))
         );
 
         StartApprovalTimer(ts);
@@ -201,28 +241,35 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
         if (toolCallId is null)
             return;
 
+        if (!IsParentToolCallId(toolCallId))
+        {
+            _logger.LogTrace(
+                "Transcript [{Session}]: ignoring inner tool {Id} execution_start",
+                ts.SessionId,
+                toolCallId.Length <= 12 ? toolCallId : toolCallId[^12..]
+            );
+            return;
+        }
+
         bool wasWaiting;
-        bool allCleared;
 
         lock (_lock)
         {
             wasWaiting = ts.WaitingPublished;
             ts.PendingToolCallIds.Remove(toolCallId);
-            allCleared = ts.PendingToolCallIds.Count == 0;
 
-            if (allCleared)
-            {
-                ts.WaitingTimerCts?.Cancel();
-                ts.WaitingTimerCts?.Dispose();
-                ts.WaitingTimerCts = null;
-            }
+            ts.WaitingTimerCts?.Cancel();
+            ts.WaitingTimerCts?.Dispose();
+            ts.WaitingTimerCts = null;
         }
 
-        if (wasWaiting && allCleared)
+        if (wasWaiting)
         {
             _logger.LogInformation(
-                "Transcript [{Session}]: tool approved, sending Clear",
-                ts.SessionId
+                "Transcript [{Session}]: tool {Id} approved, sending Clear (remaining: {Remaining})",
+                ts.SessionId,
+                toolCallId.Length <= 12 ? toolCallId : toolCallId[^12..],
+                ts.PendingToolCallIds.Count
             );
 
             lock (_lock)
@@ -241,10 +288,45 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
         else
         {
             _logger.LogDebug(
-                "Transcript [{Session}]: tool {Id} started (auto-approved)",
+                "Transcript [{Session}]: tool {Id} started (auto-approved, remaining: {Remaining})",
                 ts.SessionId,
-                toolCallId.Length <= 8 ? toolCallId : toolCallId[^8..]
+                toolCallId.Length <= 12 ? toolCallId : toolCallId[^12..],
+                ts.PendingToolCallIds.Count
             );
+        }
+    }
+
+    private void HandleToolExecutionComplete(TranscriptSession ts, JsonElement root)
+    {
+        if (!root.TryGetProperty("data", out var data))
+            return;
+
+        if (!data.TryGetProperty("toolCallId", out var idProp))
+            return;
+
+        var toolCallId = idProp.GetString();
+        if (toolCallId is null)
+            return;
+
+        if (!IsParentToolCallId(toolCallId))
+            return;
+
+        bool hasPending;
+        lock (_lock)
+        {
+            hasPending = ts.PendingToolCallIds.Count > 0;
+        }
+
+        if (hasPending)
+        {
+            _logger.LogDebug(
+                "Transcript [{Session}]: tool {Id} completed, {Remaining} sibling(s) still pending [{Ids}] — restarting approval timer",
+                ts.SessionId,
+                toolCallId.Length <= 12 ? toolCallId : toolCallId[^12..],
+                ts.PendingToolCallIds.Count,
+                string.Join(", ", ts.PendingToolCallIds.Select(id => id.Length <= 12 ? id : id[^12..]))
+            );
+            StartApprovalTimer(ts);
         }
     }
 
@@ -284,10 +366,17 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
                 ts.WaitingPublished = true;
             }
 
+            string pendingIds;
+            lock (_lock)
+            {
+                pendingIds = string.Join(", ", ts.PendingToolCallIds.Select(id => id.Length <= 12 ? id : id[^12..]));
+            }
+
             _logger.LogInformation(
-                "Transcript [{Session}]: no tool.execution_start after {Delay}ms — sending Waiting",
+                "Transcript [{Session}]: no tool.execution_start after {Delay}ms for [{Ids}] — sending Waiting",
                 ts.SessionId,
-                _config.AutoApprovedToolDetectionDelayMs
+                _config.AutoApprovedToolDetectionDelayMs,
+                pendingIds
             );
 
             _stateMachine.HandleStateChange(

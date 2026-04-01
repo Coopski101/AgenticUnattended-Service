@@ -95,6 +95,9 @@ public static class Endpoints
 
                 if (result.Action == HookAction.WatchTranscript)
                 {
+                    if (payload.ToolUseId is not null)
+                        transcriptWatcher.ConfirmToolStarted(sessionId, payload.ToolUseId);
+
                     stateMachine.HandleStateChange(
                         sessionId,
                         result.Source,

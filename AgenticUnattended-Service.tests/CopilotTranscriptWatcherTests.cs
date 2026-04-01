@@ -53,7 +53,7 @@ public sealed class CopilotTranscriptWatcherTests : IDisposable
 
         _fileReader.AppendContent(@"C:\t.jsonl",
             """
-            {"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"tc1"}]}}
+            {"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_tc1"}]}}
             """);
 
         TriggerPoll();
@@ -70,7 +70,7 @@ public sealed class CopilotTranscriptWatcherTests : IDisposable
         _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
 
         _fileReader.AppendContent(@"C:\t.jsonl",
-            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"tc1"}]}}""" + "\n");
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_tc1"}]}}""" + "\n");
 
         TriggerPoll();
 
@@ -91,11 +91,11 @@ public sealed class CopilotTranscriptWatcherTests : IDisposable
         _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
 
         _fileReader.AppendContent(@"C:\t.jsonl",
-            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"tc1"}]}}""" + "\n");
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_tc1"}]}}""" + "\n");
         TriggerPoll();
 
         _fileReader.AppendContent(@"C:\t.jsonl",
-            """{"type":"tool.execution_start","data":{"toolCallId":"tc1"}}""" + "\n");
+            """{"type":"tool.execution_start","data":{"toolCallId":"toolu_tc1"}}""" + "\n");
         TriggerPoll();
 
         await Task.Delay(200);
@@ -114,7 +114,7 @@ public sealed class CopilotTranscriptWatcherTests : IDisposable
         _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
 
         _fileReader.AppendContent(@"C:\t.jsonl",
-            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"tc1"}]}}""" + "\n");
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_tc1"}]}}""" + "\n");
         TriggerPoll();
 
         await Task.Delay(200);
@@ -122,7 +122,7 @@ public sealed class CopilotTranscriptWatcherTests : IDisposable
         Assert.Contains(_events.Events, e => e.EventType == BeaconEventType.Waiting);
 
         _fileReader.AppendContent(@"C:\t.jsonl",
-            """{"type":"tool.execution_start","data":{"toolCallId":"tc1"}}""" + "\n");
+            """{"type":"tool.execution_start","data":{"toolCallId":"toolu_tc1"}}""" + "\n");
         TriggerPoll();
 
         Assert.Contains(_events.Events, e =>
@@ -165,18 +165,18 @@ public sealed class CopilotTranscriptWatcherTests : IDisposable
     public void SetTranscriptPath_SamePath_DoesNotReSeek()
     {
         _fileReader.SetFileContent(@"C:\t.jsonl",
-            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"tc1"}]}}""" + "\n");
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_tc1"}]}}""" + "\n");
         _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
 
         _fileReader.AppendContent(@"C:\t.jsonl",
-            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"tc2"}]}}""" + "\n");
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_tc2"}]}}""" + "\n");
         _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
 
         TriggerPoll();
     }
 
     [Fact]
-    public async Task MultipleToolRequests_AllMustComplete_BeforeClear()
+    public async Task MultipleToolRequests_FirstStartCancelsTimer_NoFalseWaiting()
     {
         _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Setup", "setup");
 
@@ -184,25 +184,272 @@ public sealed class CopilotTranscriptWatcherTests : IDisposable
         _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
 
         _fileReader.AppendContent(@"C:\t.jsonl",
-            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"tc1"},{"toolCallId":"tc2"}]}}""" + "\n");
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_tc1"},{"toolCallId":"toolu_tc2"}]}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_start","data":{"toolCallId":"toolu_tc1"}}""" + "\n");
+        TriggerPoll();
+
+        await Task.Delay(200);
+
+        Assert.DoesNotContain(_events.Events, e =>
+            e.EventType == BeaconEventType.Waiting
+            && e.HookEvent == "TranscriptApprovalPending");
+    }
+
+    [Fact]
+    public async Task MultipleToolRequests_CompleteThenSiblingNeedsApproval_PublishesWaiting()
+    {
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Setup", "setup");
+
+        _fileReader.SetFileContent(@"C:\t.jsonl", "");
+        _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_tc1"},{"toolCallId":"toolu_tc2"}]}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_start","data":{"toolCallId":"toolu_tc1"}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_complete","data":{"toolCallId":"toolu_tc1"}}""" + "\n");
+        TriggerPoll();
+
+        await Task.Delay(200);
+
+        Assert.Contains(_events.Events, e =>
+            e.EventType == BeaconEventType.Waiting
+            && e.HookEvent == "TranscriptApprovalPending");
+    }
+
+    [Fact]
+    public async Task MultipleToolRequests_AllAutoApproved_NoWaiting()
+    {
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Setup", "setup");
+
+        _fileReader.SetFileContent(@"C:\t.jsonl", "");
+        _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_tc1"},{"toolCallId":"toolu_tc2"}]}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_start","data":{"toolCallId":"toolu_tc1"}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_complete","data":{"toolCallId":"toolu_tc1"}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_start","data":{"toolCallId":"toolu_tc2"}}""" + "\n");
+        TriggerPoll();
+
+        await Task.Delay(200);
+
+        Assert.DoesNotContain(_events.Events, e =>
+            e.EventType == BeaconEventType.Waiting
+            && e.HookEvent == "TranscriptApprovalPending");
+    }
+
+    [Fact]
+    public async Task MultipleToolRequests_SecondNeedsApproval_ThenApproved_PublishesClear()
+    {
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Setup", "setup");
+
+        _fileReader.SetFileContent(@"C:\t.jsonl", "");
+        _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_tc1"},{"toolCallId":"toolu_tc2"}]}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_start","data":{"toolCallId":"toolu_tc1"}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_complete","data":{"toolCallId":"toolu_tc1"}}""" + "\n");
         TriggerPoll();
 
         await Task.Delay(200);
         Assert.Contains(_events.Events, e => e.EventType == BeaconEventType.Waiting);
 
         _fileReader.AppendContent(@"C:\t.jsonl",
-            """{"type":"tool.execution_start","data":{"toolCallId":"tc1"}}""" + "\n");
-        TriggerPoll();
-
-        Assert.DoesNotContain(_events.Events, e =>
-            e.EventType == BeaconEventType.Clear && e.HookEvent == "TranscriptApproval");
-
-        _fileReader.AppendContent(@"C:\t.jsonl",
-            """{"type":"tool.execution_start","data":{"toolCallId":"tc2"}}""" + "\n");
+            """{"type":"tool.execution_start","data":{"toolCallId":"toolu_tc2"}}""" + "\n");
         TriggerPoll();
 
         Assert.Contains(_events.Events, e =>
-            e.EventType == BeaconEventType.Clear && e.HookEvent == "TranscriptApproval");
+            e.EventType == BeaconEventType.Clear
+            && e.HookEvent == "TranscriptApproval");
+    }
+
+    [Fact]
+    public async Task InnerSubagentToolCalls_AreIgnored_DoNotCauseWaiting()
+    {
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Setup", "setup");
+
+        _fileReader.SetFileContent(@"C:\t.jsonl", "");
+        _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_parent1"}]}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_start","data":{"toolCallId":"toolu_parent1"}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"call_innerABC"}]}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_start","data":{"toolCallId":"call_innerABC"}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_complete","data":{"toolCallId":"call_innerABC"}}""" + "\n");
+        TriggerPoll();
+
+        await Task.Delay(200);
+
+        Assert.DoesNotContain(_events.Events, e =>
+            e.EventType == BeaconEventType.Waiting
+            && e.HookEvent == "TranscriptApprovalPending");
+    }
+
+    [Fact]
+    public async Task InnerSubagentComplete_DoesNotRestartTimerForParentIds()
+    {
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Setup", "setup");
+
+        _fileReader.SetFileContent(@"C:\t.jsonl", "");
+        _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_p1"},{"toolCallId":"toolu_p2"}]}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_start","data":{"toolCallId":"toolu_p1"}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"call_inner1"}]}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_start","data":{"toolCallId":"call_inner1"}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_complete","data":{"toolCallId":"call_inner1"}}""" + "\n");
+        TriggerPoll();
+
+        await Task.Delay(200);
+
+        Assert.DoesNotContain(_events.Events, e =>
+            e.EventType == BeaconEventType.Waiting
+            && e.HookEvent == "TranscriptApprovalPending");
+    }
+
+    [Fact]
+    public async Task ConfirmToolStarted_ViaHook_CancelsTimerBeforeTranscriptUpdates()
+    {
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Setup", "setup");
+
+        _fileReader.SetFileContent(@"C:\t.jsonl", "");
+        _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_bdrk_01ABC123"}]}}""" + "\n");
+        TriggerPoll();
+
+        _watcher.ConfirmToolStarted("s1", "toolu_bdrk_01ABC123__vscode-12345");
+
+        await Task.Delay(200);
+
+        Assert.DoesNotContain(_events.Events, e =>
+            e.EventType == BeaconEventType.Waiting
+            && e.HookEvent == "TranscriptApprovalPending");
+    }
+
+    [Fact]
+    public async Task ConfirmToolStarted_ViaHook_WithoutVscodeSuffix_AlsoWorks()
+    {
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Setup", "setup");
+
+        _fileReader.SetFileContent(@"C:\t.jsonl", "");
+        _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_bdrk_01XYZ789"}]}}""" + "\n");
+        TriggerPoll();
+
+        _watcher.ConfirmToolStarted("s1", "toolu_bdrk_01XYZ789");
+
+        await Task.Delay(200);
+
+        Assert.DoesNotContain(_events.Events, e =>
+            e.EventType == BeaconEventType.Waiting
+            && e.HookEvent == "TranscriptApprovalPending");
+    }
+
+    [Fact]
+    public async Task ConfirmToolStarted_ViaHook_BatchPartialConfirm_SiblingStillTimesOut()
+    {
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Setup", "setup");
+
+        _fileReader.SetFileContent(@"C:\t.jsonl", "");
+        _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_bdrk_01AAA"},{"toolCallId":"toolu_bdrk_01BBB"}]}}""" + "\n");
+        TriggerPoll();
+
+        _watcher.ConfirmToolStarted("s1", "toolu_bdrk_01AAA__vscode-999");
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_complete","data":{"toolCallId":"toolu_bdrk_01AAA"}}""" + "\n");
+        TriggerPoll();
+
+        await Task.Delay(200);
+
+        Assert.Contains(_events.Events, e =>
+            e.EventType == BeaconEventType.Waiting
+            && e.HookEvent == "TranscriptApprovalPending");
+    }
+
+    [Fact]
+    public void ConfirmToolStarted_UnknownSession_DoesNotThrow()
+    {
+        _watcher.ConfirmToolStarted("nonexistent", "toolu_bdrk_01ABC__vscode-1");
+    }
+
+    [Fact]
+    public async Task ConfirmToolStarted_UnknownToolId_DoesNotCancelTimer()
+    {
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Setup", "setup");
+
+        _fileReader.SetFileContent(@"C:\t.jsonl", "");
+        _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_bdrk_01REAL"}]}}""" + "\n");
+        TriggerPoll();
+
+        _watcher.ConfirmToolStarted("s1", "toolu_bdrk_01WRONG__vscode-1");
+
+        await Task.Delay(200);
+
+        Assert.Contains(_events.Events, e =>
+            e.EventType == BeaconEventType.Waiting
+            && e.HookEvent == "TranscriptApprovalPending");
     }
 
     private void TriggerPoll()
