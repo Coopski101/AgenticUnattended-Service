@@ -4,6 +4,7 @@ using AgenticUnattended.Hooks;
 using AgenticUnattended.Sessions;
 using AgenticUnattended.Tests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 
 namespace AgenticUnattended.Tests;
 
@@ -12,7 +13,7 @@ public sealed class SessionStateMachineTests : IDisposable
     private readonly FakePlatformMonitor _monitor = new();
     private readonly EventBus _bus = new();
     private readonly SessionRegistry _registry = new();
-    private readonly BeaconConfig _config = new() { AfkThresholdSeconds = 5 };
+    private readonly BeaconConfig _config = new() { AfkThresholdSeconds = 5, DoneDebounceMs = 0 };
     private readonly EventCollector _events;
     private readonly SessionStateMachine _sm;
 
@@ -307,5 +308,122 @@ public sealed class SessionStateMachineTests : IDisposable
         Assert.Equal(BeaconMode.Done, session.PublishedState);
         Assert.Equal(3, _events.Events.Count(e =>
             e.EventType is BeaconEventType.Done or BeaconEventType.Clear));
+    }
+}
+
+public sealed class SessionStateMachineDoneDebounceTests : IDisposable
+{
+    private readonly FakePlatformMonitor _monitor = new();
+    private readonly EventBus _bus = new();
+    private readonly SessionRegistry _registry = new();
+    private readonly BeaconConfig _config = new() { AfkThresholdSeconds = 5, DoneDebounceMs = 3000 };
+    private readonly FakeTimeProvider _time = new();
+    private readonly EventCollector _events;
+    private readonly SessionStateMachine _sm;
+
+    public SessionStateMachineDoneDebounceTests()
+    {
+        _events = new EventCollector(_bus);
+        _sm = new SessionStateMachine(
+            _registry,
+            _monitor,
+            _bus,
+            _config,
+            _time,
+            NullLogger<SessionStateMachine>.Instance
+        );
+    }
+
+    public void Dispose() => _events.Dispose();
+
+    [Fact]
+    public async Task Done_NotFocused_PublishesAfterDebounce()
+    {
+        _monitor.FocusedWindowHandle = 999;
+        _monitor.FocusedWindowProcessName = "explorer";
+
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Done, "Stop", "done");
+        await Task.Delay(50);
+
+        Assert.DoesNotContain(_events.Events, e => e.EventType == BeaconEventType.Done);
+
+        _time.Advance(TimeSpan.FromMilliseconds(3001));
+        await Task.Delay(50);
+
+        Assert.Contains(_events.Events, e => e.EventType == BeaconEventType.Done);
+    }
+
+    [Fact]
+    public async Task Done_CancelledByClear_DoesNotPublish()
+    {
+        _monitor.FocusedWindowHandle = 999;
+        _monitor.FocusedWindowProcessName = "explorer";
+
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Done, "Stop", "done");
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Prompt", "clear");
+
+        _time.Advance(TimeSpan.FromMilliseconds(5000));
+        await Task.Delay(50);
+
+        Assert.DoesNotContain(_events.Events, e => e.EventType == BeaconEventType.Done);
+    }
+
+    [Fact]
+    public async Task Done_CancelledByWaiting_DoesNotPublish()
+    {
+        _monitor.FocusedWindowHandle = 999;
+        _monitor.FocusedWindowProcessName = "explorer";
+
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Done, "Stop", "done");
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Waiting, "Perm", "waiting");
+
+        _time.Advance(TimeSpan.FromMilliseconds(5000));
+        await Task.Delay(50);
+
+        Assert.DoesNotContain(_events.Events, e => e.EventType == BeaconEventType.Done);
+        Assert.Contains(_events.Events, e => e.EventType == BeaconEventType.Waiting);
+    }
+
+    [Fact]
+    public async Task Done_Focused_PublishesAfterDebounce_ThenAfkTimer()
+    {
+        _monitor.FocusedWindowHandle = 100;
+        _monitor.FocusedWindowProcessName = "Code";
+        _monitor.MarkWindowAlive(100);
+
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Done, "Stop", "done");
+        await Task.Delay(50);
+
+        _time.Advance(TimeSpan.FromMilliseconds(3001));
+        await Task.Delay(50);
+
+        Assert.DoesNotContain(_events.Events, e => e.EventType == BeaconEventType.Done);
+
+        var session = _registry.TryGetSession("s1")!;
+        Assert.NotNull(session.AfkTimerCts);
+    }
+
+    [Fact]
+    public async Task Done_RepeatedStops_ResetsDebounce()
+    {
+        _monitor.FocusedWindowHandle = 999;
+        _monitor.FocusedWindowProcessName = "explorer";
+
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Done, "Stop", "done1");
+        await Task.Delay(50);
+        _time.Advance(TimeSpan.FromMilliseconds(2000));
+        await Task.Delay(50);
+
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Done, "Stop", "done2");
+        await Task.Delay(50);
+        _time.Advance(TimeSpan.FromMilliseconds(2000));
+        await Task.Delay(50);
+
+        Assert.DoesNotContain(_events.Events, e => e.EventType == BeaconEventType.Done);
+
+        _time.Advance(TimeSpan.FromMilliseconds(1500));
+        await Task.Delay(50);
+
+        Assert.Single(_events.Events, e => e.EventType == BeaconEventType.Done);
     }
 }

@@ -12,6 +12,7 @@ public sealed class SessionInfo
     public DateTimeOffset StateChangedAt { get; set; } = DateTimeOffset.UtcNow;
     public uint InputTickAtStateChange { get; set; }
     public CancellationTokenSource? AfkTimerCts { get; set; }
+    public CancellationTokenSource? DoneDebounceCts { get; set; }
 
     public SessionInfo(string sessionId, nint windowHandle, AgentSource source)
     {
@@ -25,5 +26,12 @@ public sealed class SessionInfo
         AfkTimerCts?.Cancel();
         AfkTimerCts?.Dispose();
         AfkTimerCts = null;
+    }
+
+    public void CancelDoneDebounce()
+    {
+        DoneDebounceCts?.Cancel();
+        DoneDebounceCts?.Dispose();
+        DoneDebounceCts = null;
     }
 }

@@ -8,6 +8,7 @@ public sealed class BeaconConfig
     public int PollIntervalMs { get; set; } = 250;
     public int IdleTimeoutSeconds { get; set; } = 300;
     public int AutoApprovedToolDetectionDelayMs { get; set; } = 4000;
+    public int DoneDebounceMs { get; set; } = 15000;
     public bool FakeMode { get; set; } = false;
 
     public Dictionary<string, string> CopilotEventMappings { get; set; } = DefaultCopilotMappings();

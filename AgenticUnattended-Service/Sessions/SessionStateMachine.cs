@@ -280,11 +280,19 @@ public sealed class SessionStateMachine
 
     private void HandleClear(SessionInfo session, string hookEvent, string reason)
     {
+        var hadPendingDebounce = session.DoneDebounceCts is not null;
         session.CancelAfkTimer();
+        session.CancelDoneDebounce();
         session.InternalState = BeaconMode.Idle;
 
         if (session.PublishedState is BeaconMode.Waiting or BeaconMode.Done)
         {
+            _logger.LogInformation(
+                "Session {Session} Clear ({HookEvent}) — reverting published {State}",
+                session.SessionId,
+                hookEvent,
+                session.PublishedState
+            );
             session.PublishedState = BeaconMode.Idle;
             Publish(
                 new BeaconEvent
@@ -299,6 +307,14 @@ public sealed class SessionStateMachine
         }
         else
         {
+            if (hadPendingDebounce)
+            {
+                _logger.LogInformation(
+                    "Session {Session} Clear ({HookEvent}) — cancelled pending Done debounce before it published",
+                    session.SessionId,
+                    hookEvent
+                );
+            }
             session.PublishedState = BeaconMode.Idle;
         }
     }
@@ -313,6 +329,20 @@ public sealed class SessionStateMachine
         var mode = action == HookAction.Waiting ? BeaconMode.Waiting : BeaconMode.Done;
         var wireType = ToWireEvent(action);
         session.CancelAfkTimer();
+        session.CancelDoneDebounce();
+
+        if (action == HookAction.Done && _config.DoneDebounceMs > 0)
+        {
+            session.InternalState = BeaconMode.Done;
+            _logger.LogDebug(
+                "Session {Session} Stop received — debouncing Done for {Delay}ms",
+                session.SessionId,
+                _config.DoneDebounceMs
+            );
+            StartDoneDebounce(session, hookEvent, reason);
+            return;
+        }
+
         session.InternalState = mode;
         session.StateChangedAt = DateTimeOffset.UtcNow;
         session.InputTickAtStateChange = _monitor.LastInputTick;
@@ -348,6 +378,80 @@ public sealed class SessionStateMachine
                 _config.AfkThresholdSeconds
             );
             StartAfkTimer(session, action, hookEvent, reason);
+        }
+    }
+
+    private void StartDoneDebounce(
+        SessionInfo session,
+        string hookEvent,
+        string reason
+    )
+    {
+        var cts = new CancellationTokenSource();
+        session.DoneDebounceCts = cts;
+        _ = DoneDebounceAsync(session, hookEvent, reason, cts);
+    }
+
+    private async Task DoneDebounceAsync(
+        SessionInfo session,
+        string hookEvent,
+        string reason,
+        CancellationTokenSource cts
+    )
+    {
+        try
+        {
+            await Task.Delay(
+                TimeSpan.FromMilliseconds(_config.DoneDebounceMs),
+                _time,
+                cts.Token
+            );
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug(
+                "Session {Session} Done debounce cancelled — agent still active",
+                session.SessionId
+            );
+            return;
+        }
+
+        if (session.InternalState == BeaconMode.Idle)
+            return;
+
+        session.InternalState = BeaconMode.Done;
+        session.StateChangedAt = DateTimeOffset.UtcNow;
+        session.InputTickAtStateChange = _monitor.LastInputTick;
+
+        var isFocused =
+            _monitor.FocusedWindowHandle == session.WindowHandle
+            && session.WindowHandle != nint.Zero;
+
+        if (!isFocused)
+        {
+            session.PublishedState = BeaconMode.Done;
+            _logger.LogInformation(
+                "Session {Session} Done debounce expired — publishing Done",
+                session.SessionId
+            );
+            Publish(
+                new BeaconEvent
+                {
+                    EventType = BeaconEventType.Done,
+                    SessionId = session.SessionId,
+                    Source = session.Source,
+                    HookEvent = hookEvent,
+                    Reason = reason,
+                }
+            );
+        }
+        else
+        {
+            _logger.LogInformation(
+                "Session {Session} Done debounce expired but focused — starting AFK timer",
+                session.SessionId
+            );
+            StartAfkTimer(session, HookAction.Done, hookEvent, reason);
         }
     }
 
