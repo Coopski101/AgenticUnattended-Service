@@ -452,6 +452,48 @@ public sealed class CopilotTranscriptWatcherTests : IDisposable
             && e.HookEvent == "TranscriptApprovalPending");
     }
 
+    [Fact]
+    public async Task ConfirmToolStarted_HookBeforeTranscript_PreConfirmsAndSkipsPending()
+    {
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Setup", "setup");
+
+        _fileReader.SetFileContent(@"C:\t.jsonl", "");
+        _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
+
+        _watcher.ConfirmToolStarted("s1", "toolu_bdrk_01FAST__vscode-999");
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_bdrk_01FAST"}]}}""" + "\n");
+        TriggerPoll();
+
+        await Task.Delay(200);
+
+        Assert.DoesNotContain(_events.Events, e =>
+            e.EventType == BeaconEventType.Waiting
+            && e.HookEvent == "TranscriptApprovalPending");
+    }
+
+    [Fact]
+    public async Task ConfirmToolStarted_HookBeforeTranscript_BatchPartialPreConfirm_SiblingStillTimesOut()
+    {
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Setup", "setup");
+
+        _fileReader.SetFileContent(@"C:\t.jsonl", "");
+        _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
+
+        _watcher.ConfirmToolStarted("s1", "toolu_bdrk_01FAST__vscode-999");
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_bdrk_01FAST"},{"toolCallId":"toolu_bdrk_01SLOW"}]}}""" + "\n");
+        TriggerPoll();
+
+        await Task.Delay(200);
+
+        Assert.Contains(_events.Events, e =>
+            e.EventType == BeaconEventType.Waiting
+            && e.HookEvent == "TranscriptApprovalPending");
+    }
+
     private void TriggerPoll()
     {
         var method = typeof(CopilotTranscriptWatcher).GetMethod(

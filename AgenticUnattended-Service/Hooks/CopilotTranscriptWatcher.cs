@@ -67,7 +67,15 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
                 return;
 
             if (!ts.PendingToolCallIds.Remove(baseId))
+            {
+                ts.PreConfirmedToolCallIds.Add(baseId);
+                _logger.LogDebug(
+                    "Transcript [{Session}]: tool {Id} pre-confirmed via hook (transcript hasn't caught up yet)",
+                    sessionId,
+                    baseId.Length <= 12 ? baseId : baseId[^12..]
+                );
                 return;
+            }
 
             _logger.LogDebug(
                 "Transcript [{Session}]: tool {Id} confirmed started via hook (remaining: {Remaining})",
@@ -215,15 +223,29 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
         {
             foreach (var id in toolCallIds)
             {
-                ts.PendingToolCallIds.Add(id);
+                if (ts.PreConfirmedToolCallIds.Remove(id))
+                {
+                    _logger.LogDebug(
+                        "Transcript [{Session}]: tool {Id} already pre-confirmed via hook — skipping pending",
+                        ts.SessionId,
+                        id.Length <= 12 ? id : id[^12..]
+                    );
+                }
+                else
+                {
+                    ts.PendingToolCallIds.Add(id);
+                }
             }
         }
+
+        if (ts.PendingToolCallIds.Count == 0)
+            return;
 
         _logger.LogDebug(
             "Transcript [{Session}]: {Count} parent tool request(s) pending approval: [{Ids}]",
             ts.SessionId,
-            toolCallIds.Count,
-            string.Join(", ", toolCallIds.Select(id => id.Length <= 12 ? id : id[^12..]))
+            ts.PendingToolCallIds.Count,
+            string.Join(", ", ts.PendingToolCallIds.Select(id => id.Length <= 12 ? id : id[^12..]))
         );
 
         StartApprovalTimer(ts);
@@ -408,6 +430,7 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
         public required string Path { get; init; }
         public long LastFilePosition { get; set; }
         public HashSet<string> PendingToolCallIds { get; } = [];
+        public HashSet<string> PreConfirmedToolCallIds { get; } = [];
         public CancellationTokenSource? WaitingTimerCts { get; set; }
         public bool WaitingPublished { get; set; }
     }
