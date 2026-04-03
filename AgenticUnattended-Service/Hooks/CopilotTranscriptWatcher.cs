@@ -221,6 +221,22 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
 
         lock (_lock)
         {
+            if (ts.PendingToolCallIds.Count > 0)
+            {
+                _logger.LogDebug(
+                    "Transcript [{Session}]: new assistant turn — clearing {Count} stale pending ID(s): [{Ids}]",
+                    ts.SessionId,
+                    ts.PendingToolCallIds.Count,
+                    string.Join(", ", ts.PendingToolCallIds.Select(id => id.Length <= 12 ? id : id[^12..]))
+                );
+                ts.PendingToolCallIds.Clear();
+            }
+
+            ts.WaitingTimerCts?.Cancel();
+            ts.WaitingTimerCts?.Dispose();
+            ts.WaitingTimerCts = null;
+            ts.WaitingPublished = false;
+
             foreach (var id in toolCallIds)
             {
                 if (ts.PreConfirmedToolCallIds.Remove(id))

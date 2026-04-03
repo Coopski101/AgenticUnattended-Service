@@ -494,6 +494,36 @@ public sealed class CopilotTranscriptWatcherTests : IDisposable
             && e.HookEvent == "TranscriptApprovalPending");
     }
 
+    [Fact]
+    public async Task NewAssistantMessage_ClearsStalePendingFromPreviousTurn()
+    {
+        _sm.HandleStateChange("s1", AgentSource.Copilot, HookAction.Clear, "Setup", "setup");
+
+        _fileReader.SetFileContent(@"C:\t.jsonl", "");
+        _watcher.SetTranscriptPath("s1", @"C:\t.jsonl");
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_bdrk_01GHOST"},{"toolCallId":"toolu_bdrk_01GOOD"}]}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_start","data":{"toolCallId":"toolu_bdrk_01GOOD"}}""" + "\n");
+        TriggerPoll();
+
+        _fileReader.AppendContent(@"C:\t.jsonl",
+            """{"type":"tool.execution_complete","data":{"toolCallId":"toolu_bdrk_01GOOD"}}""" + "\n"
+            + """{"type":"assistant.message","data":{"toolRequests":[{"toolCallId":"toolu_bdrk_01NEXT"}]}}""" + "\n");
+        TriggerPoll();
+
+        _watcher.ConfirmToolStarted("s1", "toolu_bdrk_01NEXT__vscode-1");
+
+        await Task.Delay(200);
+
+        Assert.DoesNotContain(_events.Events, e =>
+            e.EventType == BeaconEventType.Waiting
+            && e.HookEvent == "TranscriptApprovalPending");
+    }
+
     private void TriggerPoll()
     {
         var method = typeof(CopilotTranscriptWatcher).GetMethod(
