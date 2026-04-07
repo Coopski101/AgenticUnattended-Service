@@ -66,11 +66,11 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
             if (!_sessions.TryGetValue(sessionId, out var ts))
                 return;
 
-            if (!ts.PendingToolCallIds.Remove(baseId))
+            if (!ts.PendingToolCallIds.Contains(baseId))
             {
                 ts.PreConfirmedToolCallIds.Add(baseId);
                 _logger.LogDebug(
-                    "Transcript [{Session}]: tool {Id} pre-confirmed via hook (transcript hasn't caught up yet)",
+                    "Transcript [{Session}]: tool {Id} hook fired (transcript hasn't caught up yet — will restart timer when it does)",
                     sessionId,
                     baseId.Length <= 12 ? baseId : baseId[^12..]
                 );
@@ -78,7 +78,7 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
             }
 
             _logger.LogDebug(
-                "Transcript [{Session}]: tool {Id} confirmed started via hook (remaining: {Remaining})",
+                "Transcript [{Session}]: tool {Id} hook fired — restarting approval timer (pending: {Remaining})",
                 sessionId,
                 baseId.Length <= 12 ? baseId : baseId[^12..],
                 ts.PendingToolCallIds.Count
@@ -87,6 +87,13 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
             ts.WaitingTimerCts?.Cancel();
             ts.WaitingTimerCts?.Dispose();
             ts.WaitingTimerCts = null;
+        }
+
+        lock (_lock)
+        {
+            if (!_sessions.TryGetValue(sessionId, out var ts2))
+                return;
+            StartApprovalTimer(ts2);
         }
     }
 
@@ -239,17 +246,14 @@ public sealed class CopilotTranscriptWatcher : BackgroundService
 
             foreach (var id in toolCallIds)
             {
+                ts.PendingToolCallIds.Add(id);
                 if (ts.PreConfirmedToolCallIds.Remove(id))
                 {
                     _logger.LogDebug(
-                        "Transcript [{Session}]: tool {Id} already pre-confirmed via hook — skipping pending",
+                        "Transcript [{Session}]: tool {Id} had hook fire before transcript — timer already restarted",
                         ts.SessionId,
                         id.Length <= 12 ? id : id[^12..]
                     );
-                }
-                else
-                {
-                    ts.PendingToolCallIds.Add(id);
                 }
             }
         }
